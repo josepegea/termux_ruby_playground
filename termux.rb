@@ -11,7 +11,9 @@ module RubyTermux
     end
 
     def json_api_command(command, *args)
-      JSON.parse(api_command(command, args), symbolize_names: true)
+      res = api_command(command, args)
+      return res if res.nil? || res == ''
+      JSON.parse(res, symbolize_names: true)
     end
 
     # Systems
@@ -26,6 +28,14 @@ module RubyTermux
 
     def call_log
       @call_log ||= CallLog.new(self)
+    end
+
+    def location
+      @location ||= Location.new(self)
+    end
+
+    def sms
+      @sms ||= Sms.new(self)
     end
   end
 
@@ -63,6 +73,51 @@ module RubyTermux
     end
   end
 
+  class Location < System
+    def get(provider: nil, request: nil)
+      args = []
+      args += ['-p', provider] unless provider.nil?
+      args += ['-r', request] unless request.nil?
+      res = base_object.json_api_command('location', *args)
+      Xformer.xform(res, provider: :symbol)
+    end
+
+    def gps(request: nil)
+      get(provider: :gps, request: request)
+    end
+
+    def network(request: nil)
+      get(provider: :network, request: request)
+    end
+  end
+
+  class Sms < System
+    def list(limit: nil, offset: nil, type: nil)
+      args = []
+      args += ['-l', limit.to_s] unless limit.nil?
+      args += ['-o', offset.to_s] unless offset.nil?
+      args += ['-t', type.to_s] unless type.nil?
+      res = base_object.json_api_command('sms-list', *args)
+      Xformer.xform(res, received: :time, type: :symbol)
+    end
+
+    def inbox(limit: nil, offset: nil)
+      list(limit: limit, offset: offset, type: :inbox)
+    end
+
+    def outbox(limit: nil, offset: nil)
+      list(limit: limit, offset: offset, type: :outbox)
+    end
+
+    def sent(limit: nil, offset: nil)
+      list(limit: limit, offset: offset, type: :sent)
+    end
+
+    def draft(limit: nil, offset: nil)
+      list(limit: limit, offset: offset, type: :draft)
+    end
+  end
+
   class Xformer
     def self.xform(object, args)
       collection = object.is_a?(Array) ? object : [object]
@@ -85,7 +140,7 @@ module RubyTermux
       when :date
         Date.parse(value)
       when :time
-        Time.parse(value)
+        Time.parse(fix_time(value))
       when :duration
         to_duration(value)
       when :integer
@@ -105,6 +160,11 @@ module RubyTermux
       res += (parts.pop.to_i * 60) if parts.any?
       res += (parts.pop.to_i * 60 * 60) if parts.any?
       res
+    end
+
+    def self.fix_time(time_str)
+      # Termux likes to give hours in 24:xx:xx format instead of 00:xx:xx
+      time_str.gsub(/(.*)(24)(:\d\d:\d\d)(.*)/, '\1'+'00'+'\3'+'\4')
     end
   end
 end
